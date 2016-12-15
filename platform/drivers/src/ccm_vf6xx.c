@@ -32,7 +32,7 @@
 #include <ccm_vf6xx.h>
 
 /* ARM Cortex-A5 clock, core clock */
-uint32_t ccmCoreClock = 0;
+uint32_t ccmCoreClk = 0;
 /* Platform bus clock and Cortex-M4 core clock */
 uint32_t ccmPlatformBusClk = 0;
 /* IPS bus clock */
@@ -84,31 +84,31 @@ void CCM_GetClocks()
 
 	switch (CCM_CCSR & CCM_CCSR_SYS_CLK_SEL_MASK) {
 	case CCM_CCSR_SYS_CLK_SEL_FAST:
-		ccmCoreClock = FXOSC_CLK_24M;
+		ccmCoreClk = FXOSC_CLK_24M;
 		break;
 	case CCM_CCSR_SYS_CLK_SEL_SLOW:
-		ccmCoreClock = FXOSC_CLK_32K;
+		ccmCoreClk = FXOSC_CLK_32K;
 		break;
 	case CCM_CCSR_SYS_CLK_SEL_PLL2_PFD:
 
 		pllPfdSel = (CCM_CCSR & CCM_CCSR_PLL2_PFD_CLK_SEL_MASK) >> CCM_CCSR_PLL2_PFD_CLK_SEL_SHIFT;
-		ccmCoreClock = CCM_GetPllFreq(pllPfdSel, ANADIG_PLL2_PFD, PLL2_MAIN_CLK);
+		ccmCoreClk = CCM_GetPllFreq(pllPfdSel, ANADIG_PLL2_PFD, PLL2_MAIN_CLK);
 		break;
 	case CCM_CCSR_SYS_CLK_SEL_PLL2:
-		ccmCoreClock = PLL2_MAIN_CLK;
+		ccmCoreClk = PLL2_MAIN_CLK;
 		break;
 	case CCM_CCSR_SYS_CLK_SEL_PLL1_PFD:
 		pllPfdSel = (CCM_CCSR & CCM_CCSR_PLL1_PFD_CLK_SEL_MASK) >> CCM_CCSR_PLL1_PFD_CLK_SEL_SHIFT;
 
-		ccmCoreClock = CCM_GetPllFreq(pllPfdSel, ANADIG_PLL1_PFD, PLL1_MAIN_CLK);
+		ccmCoreClk = CCM_GetPllFreq(pllPfdSel, ANADIG_PLL1_PFD, PLL1_MAIN_CLK);
 		break;
 	case CCM_CCSR_SYS_CLK_SEL_PLL3:
-		ccmCoreClock = PLL3_MAIN_CLK;
+		ccmCoreClk = PLL3_MAIN_CLK;
 		break;
 	}
 
-	ccmCoreClock /= ((CCM_CACRR & CCM_CACRR_ARM_CLK_DIV_MASK) + 1);
-	ccmPlatformBusClk = ccmCoreClock /
+	ccmCoreClk /= ((CCM_CACRR & CCM_CACRR_ARM_CLK_DIV_MASK) + 1);
+	ccmPlatformBusClk = ccmCoreClk /
 					(((CCM_CACRR & CCM_CACRR_BUS_CLK_DIV_MASK) >> CCM_CACRR_BUS_CLK_DIV_SHIFT) + 1);
 	ccmIpgBusClk = ccmPlatformBusClk /
 					(((CCM_CACRR & CCM_CACRR_IPG_CLK_DIV_MASK) >> CCM_CACRR_IPG_CLK_DIV_SHIFT) + 1);
