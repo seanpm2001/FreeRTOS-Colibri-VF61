@@ -43,7 +43,7 @@
 #define PLL3_MAIN_CLK		480000000
 
 #define FXOSC_CLK_24M		24000000
-#define FXOSC_CLK_32K		32000
+#define FXOSC_CLK_32K		32768
 
 /* --- Variable definitions ------------------------------------------------ */
 extern uint32_t ccmCoreClk;
