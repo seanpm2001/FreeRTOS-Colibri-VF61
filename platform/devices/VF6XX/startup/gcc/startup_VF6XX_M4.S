@@ -111,6 +111,7 @@ __isr_vector:
     .long   0
     .long   FLEXTIMER0_Handler
     .long   FLEXTIMER1_Handler
+    .long   FLEXTIMER2_Handler
     .long   FLEXTIMER3_Handler
     .long   0
     .long   0
