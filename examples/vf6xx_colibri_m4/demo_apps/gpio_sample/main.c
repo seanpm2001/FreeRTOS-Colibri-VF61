@@ -62,7 +62,7 @@ void switch_task(void *p)
 void led_toggle_task(void *p)
 {
 	for (;;) {
-		GPIO_TogglePinOutput(GPIO(39), 39, gpioPinSet);
+		GPIO_TogglePinOutput(GPIO(39), 39);
 
 		vTaskDelay(500);
 	}

@@ -86,14 +86,6 @@ void GPIO_WritePinOutput(GPIO_Type* base, uint32_t pin, gpio_pin_action_t pinVal
 		GPIO_PSOR_REG(base) &= ~(GPIO_OFFSET(pin));  /* Set pin output to low level.*/
 }
 
-void GPIO_TogglePinOutput(GPIO_Type* base, uint32_t pin, gpio_pin_action_t pinVal)
-{
-	if (pinVal == gpioPinSet)
-		GPIO_PTOR_REG(base) |= GPIO_OFFSET(pin);  /* Set pin output to high level.*/
-	else
-		GPIO_PTOR_REG(base) &= ~(GPIO_OFFSET(pin));  /* Set pin output to low level.*/
-}
-
 /*******************************************************************************
  * EOF
  ******************************************************************************/

@@ -88,8 +88,6 @@ extern "C" {
  */
 void GPIO_Init(GPIO_Type* base, gpio_init_t* initStruct);
 
-void GPIO_TogglePinOutput(GPIO_Type* base, uint32_t pin, gpio_pin_action_t pinVal);
-
 /*@}*/
 
 /*!
@@ -201,6 +199,11 @@ static inline void GPIO_WritePortOutput(GPIO_Type* base, uint32_t portVal)
 static inline uint8_t GPIO_ReadPadStatus(GPIO_Type* base, uint32_t pin)
 {
 	return (uint8_t)((GPIO_PSOR_REG(base) >> (pin & 0x1f)) & 1U);
+}
+
+static inline void GPIO_TogglePinOutput(GPIO_Type* base, uint32_t pin)
+{
+	GPIO_PTOR_REG(base) |= GPIO_OFFSET(pin);
 }
 
 /*@}*/
