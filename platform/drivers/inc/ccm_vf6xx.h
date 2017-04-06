@@ -248,20 +248,8 @@ enum ccm_clock_gate {
 	ccmCg191Reserved
 };
 
-uint32_t ccm_ccgr_offset[] = {
-	(uint32_t)(&CCM_CCGR0),
-	(uint32_t)(&CCM_CCGR1),
-	(uint32_t)(&CCM_CCGR2),
-	(uint32_t)(&CCM_CCGR3),
-	(uint32_t)(&CCM_CCGR4),
-	(uint32_t)(&CCM_CCGR5),
-	(uint32_t)(&CCM_CCGR6),
-	(uint32_t)(&CCM_CCGR7),
-	(uint32_t)(&CCM_CCGR8),
-	(uint32_t)(&CCM_CCGR9),
-	(uint32_t)(&CCM_CCGR10),
-	(uint32_t)(&CCM_CCGR11),
-};
+extern const uint32_t ccm_ccgr_offset[];
+
 /*!
  * @brief CCM gate control value
  */
