@@ -95,6 +95,11 @@ void _shutdown_cpu(int cpu_id)
 {
 }
 
+int platform_in_isr(void)
+{
+    return ((SCB->ICSR & SCB_ICSR_VECTACTIVE_Msk) != 0);
+}
+
 void platform_isr(int vect_id, void *data)
 {
     hil_isr(((struct proc_vring *) data));

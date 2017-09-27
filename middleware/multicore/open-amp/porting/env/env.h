@@ -68,6 +68,10 @@
  *       env_sleep_msec
  *       env_disable_interrupts
  *       env_restore_interrupts
+ *       env_create_queue
+ *       env_delete_queue
+ *       env_put_queue
+ *       env_get_queue
  *
  **************************************************************************/
 #ifndef _ENV_H_
@@ -427,5 +431,56 @@ unsigned long long env_get_timestamp(void);
 void env_disable_cache(void);
 
 typedef void LOCK;
+
+/**
+ * env_create_queue
+ *
+ * Creates a message queue.
+ *
+ * @param queue -  pointer to created queue
+ * @param length -  maximum number of elements in the queue
+ * @param item_size - queue element size in bytes
+ *
+ * @return - status of function execution
+ */
+int env_create_queue(void **queue, int length , int element_size);
+
+/**
+ * env_delete_queue
+ *
+ * Deletes the message queue.
+ *
+ * @param queue - queue to delete
+ */
+
+void env_delete_queue(void *queue);
+
+/**
+ * env_put_queue
+ *
+ * Put an element in a queue.
+ *
+ * @param queue - queue to put element in
+ * @param msg - pointer to the message to be put into the queue
+ * @param timeout_ms - timeout in ms
+ *
+ * @return - status of function execution
+ */
+
+int env_put_queue(void *queue, void* msg, int timeout_ms);
+
+/**
+ * env_get_queue
+ *
+ * Get an element out of a queue.
+ *
+ * @param queue - queue to get element from
+ * @param msg - pointer to a memory to save the message
+ * @param timeout_ms - timeout in ms
+ *
+ * @return - status of function execution
+ */
+
+int env_get_queue(void *queue, void* msg, int timeout_ms);
 
 #endif /* _ENV_H_ */

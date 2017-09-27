@@ -44,6 +44,7 @@
 
 #include "env.h"
 #include "../config/config.h"
+#include "semphr.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,7 @@
 /*
  * function decalaration for platform provided facility
  */
+extern int platform_in_isr(void);
 extern void platform_interrupt_enable(void);
 extern void platform_interrupt_disable(void);
 
@@ -67,6 +69,17 @@ extern void platform_interrupt_disable(void);
  */
 struct isr_info isr_table[ISR_COUNT];
 int Intr_Count = 0;
+
+/**
+ * env_in_isr
+ *
+ * @returns - true, if currently in ISR
+ *
+ */
+int env_in_isr(void)
+{
+    return platform_in_isr();
+}
 
 /**
  * env_init
@@ -229,7 +242,15 @@ void *env_map_patova(unsigned long address)
  */
 int env_create_mutex(void **lock, int count)
 {
-    return 0;
+    *lock = xSemaphoreCreateCounting(10, count);
+    if(*lock)
+    {
+        return 0;
+    }
+    else
+    {
+        return -1;
+    }
 }
 
 /**
@@ -240,6 +261,7 @@ int env_create_mutex(void **lock, int count)
  */
 void env_delete_mutex(void *lock)
 {
+    vSemaphoreDelete(lock);
 }
 
 /**
@@ -253,7 +275,12 @@ void env_delete_mutex(void *lock)
  */
 void env_lock_mutex(void *lock)
 {
-    env_disable_interrupts();
+    SemaphoreHandle_t xSemaphore = (SemaphoreHandle_t)lock;
+    if(!env_in_isr())
+    {
+        xSemaphoreTake( xSemaphore, portMAX_DELAY);
+	env_disable_interrupts();
+    }
 }
 
 /**
@@ -267,7 +294,12 @@ void env_lock_mutex(void *lock)
 
 void env_unlock_mutex(void *lock)
 {
-    env_restore_interrupts();
+    SemaphoreHandle_t xSemaphore = (SemaphoreHandle_t)lock;
+    if(!env_in_isr())
+    {
+        env_restore_interrupts();
+	xSemaphoreGive( xSemaphore );
+    }
 }
 
 
@@ -280,7 +312,7 @@ void env_unlock_mutex(void *lock)
  */
 int env_create_sync_lock(void **lock , int state)
 {
-    return 0;
+    return env_create_mutex(lock, state); /* state=1 .. initially free */
 }
 
 /**
@@ -291,6 +323,8 @@ int env_create_sync_lock(void **lock , int state)
  */
 void env_delete_sync_lock(void *lock)
 {
+    if(lock)
+        env_delete_mutex(lock);
 }
 
 /**
@@ -301,6 +335,17 @@ void env_delete_sync_lock(void *lock)
  */
 void env_acquire_sync_lock(void *lock)
 {
+    BaseType_t xTaskWokenByReceive = pdFALSE;
+    SemaphoreHandle_t xSemaphore = (SemaphoreHandle_t)lock;
+    if(env_in_isr())
+    {
+        xSemaphoreTakeFromISR(xSemaphore, &xTaskWokenByReceive);
+	portEND_SWITCHING_ISR( xTaskWokenByReceive );
+    }
+    else
+    {
+        xSemaphoreTake( xSemaphore, portMAX_DELAY);
+    }
 }
 
 /**
@@ -311,6 +356,17 @@ void env_acquire_sync_lock(void *lock)
 
 void env_release_sync_lock(void *lock)
 {
+    BaseType_t xTaskWokenByReceive = pdFALSE;
+    SemaphoreHandle_t xSemaphore = (SemaphoreHandle_t)lock;
+    if(env_in_isr())
+    {
+        xSemaphoreGiveFromISR(xSemaphore, &xTaskWokenByReceive);
+        portEND_SWITCHING_ISR( xTaskWokenByReceive );
+    }
+    else
+    {
+        xSemaphoreGive( xSemaphore);
+    }
 }
 
 /**
@@ -437,7 +493,14 @@ void env_disable_cache()
  */
 unsigned long long env_get_timestamp(void)
 {
-    return 0;
+    if(env_in_isr())
+    {
+        return (unsigned long long) xTaskGetTickCountFromISR();
+    }
+    else
+    {
+        return (unsigned long long) xTaskGetTickCount();
+    }
 }
 
 /*========================================================= */
@@ -458,4 +521,107 @@ void freertos_env_isr(int vector) {
             break;
         }
     }
+}
+
+/*
+ * env_create_queue
+ *
+ * Creates a message queue.
+ *
+ * @param queue -  pointer to created queue
+ * @param length -  maximum number of elements in the queue
+ * @param item_size - queue element size in bytes
+ *
+ * @return - status of function execution
+ */
+int env_create_queue(void **queue, int length , int element_size)
+{
+    *queue = xQueueCreate(length, element_size);
+    if(*queue)
+    {
+        return 0;
+    }
+    else
+    {
+        return -1;
+    }
+}
+
+/**
+ * env_delete_queue
+ *
+ * Deletes the message queue.
+ *
+ * @param queue - queue to delete
+ */
+
+void env_delete_queue(void *queue)
+{
+    vQueueDelete(queue);
+}
+
+/**
+ * env_put_queue
+ *
+ * Put an element in a queue.
+ *
+ * @param queue - queue to put element in
+ * @param msg - pointer to the message to be put into the queue
+ * @param timeout_ms - timeout in ms
+ *
+ * @return - status of function execution
+ */
+
+int env_put_queue(void *queue, void* msg, int timeout_ms)
+{
+    BaseType_t xHigherPriorityTaskWoken;
+    if(env_in_isr())
+    {
+        if(xQueueSendFromISR(queue, msg, &xHigherPriorityTaskWoken) == pdPASS)
+        {
+            portEND_SWITCHING_ISR( xHigherPriorityTaskWoken );
+            return 1;
+        }
+    }
+    else
+    {
+        if(xQueueSend(queue, msg, ((portMAX_DELAY == timeout_ms) ? portMAX_DELAY : timeout_ms / portTICK_PERIOD_MS)) == pdPASS)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * env_get_queue
+ *
+ * Get an element out of a queue.
+ *
+ * @param queue - queue to get element from
+ * @param msg - pointer to a memory to save the message
+ * @param timeout_ms - timeout in ms
+ *
+ * @return - status of function execution
+ */
+
+int env_get_queue(void *queue, void* msg, int timeout_ms)
+{
+    BaseType_t xHigherPriorityTaskWoken;
+    if(env_in_isr())
+    {
+        if(xQueueReceiveFromISR(queue, msg, &xHigherPriorityTaskWoken) == pdPASS)
+        {
+            portEND_SWITCHING_ISR( xHigherPriorityTaskWoken );
+            return 1;
+        }
+    }
+    else
+    {
+        if(xQueueReceive(queue, msg, ((portMAX_DELAY == timeout_ms) ? portMAX_DELAY : timeout_ms / portTICK_PERIOD_MS)) == pdPASS)
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
