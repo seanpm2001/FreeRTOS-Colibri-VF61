@@ -39,6 +39,7 @@
 #include <ccm_vf6xx.h>
 #include "debug_console_vf6xx.h"
 #include "pin_mux.h"
+#include "rpmsg/rpmsg_rtos.h"
 
 /*
  * function decalaration for platform provided facility
@@ -51,48 +52,49 @@ extern void platform_interrupt_disable(void);
  */
 #define APP_MSCM_IRQ_PRIORITY	3
 
-/* Internal functions */
-static void rpmsg_channel_created(struct rpmsg_channel *rp_chnl);
-static void rpmsg_channel_deleted(struct rpmsg_channel *rp_chnl);
-static void rpmsg_read_cb(struct rpmsg_channel *, void *, int, void *, unsigned long);
+typedef struct the_message
+{
+    uint32_t DATA;
+} THE_MESSAGE, *THE_MESSAGE_PTR;
 
-/* Globals */
-static struct remote_device *rdev;
-static struct rpmsg_channel *app_chnl;
-static uint32_t msg_var;
-static SemaphoreHandle_t app_sema;
 
 /*!
  * @brief A basic RPMSG task
  */
-void PingPongTask(void *pvParameters)
+static void PingPongTask (void* param)
 {
-    printf("RPMSG PingPong Demo...\r\n");
+    int result;
+    struct remote_device *rdev = NULL;
+    struct rpmsg_channel *app_chnl = NULL;
+    THE_MESSAGE msg = {0};
+    int len;
 
-    app_sema = xSemaphoreCreateCounting(2, 0);
+    /* Print the initial banner */
+    PRINTF("\r\nRPMSG PingPong FreeRTOS RTOS API Demo...\r\n");
 
-    printf("RPMSG Init as Remote\r\n");
-    /*
-    * RPMSG Init as REMOTE
-    */
-    rpmsg_init(0, &rdev, rpmsg_channel_created, rpmsg_channel_deleted, rpmsg_read_cb, RPMSG_MASTER);
+    PRINTF("RPMSG Init as Remote\r\n");
+    result = rpmsg_rtos_init(0 /*REMOTE_CPU_ID*/, &rdev, RPMSG_MASTER, &app_chnl);
+    assert(0 == result);
 
-    /*
-    * rpmsg_channel_created will post the first semaphore
-    */
-    xSemaphoreTake(app_sema, portMAX_DELAY);
-    printf("Name service handshake is done, M4 has setup a rpmsg channel [%lu ---> %lu]\r\n", app_chnl->src, app_chnl->dst);
+    PRINTF("Name service handshake is done, M4 has setup a rpmsg channel [%d ---> %d]\r\n", app_chnl->src, app_chnl->dst);
 
-
-    /*
-    * pingpong demo loop
-    */
-    for (;;) {
-	xSemaphoreTake(app_sema, portMAX_DELAY);
-	printf("Get Data From A5 : %lu\r\n", msg_var);
-	msg_var++;
-	rpmsg_send(app_chnl, (void*)&msg_var, sizeof(uint32_t));
+    while (true)
+    {
+        /* receive/send data to channel default ept */
+        result = rpmsg_rtos_recv(app_chnl->rp_ept, &msg, &len, sizeof(THE_MESSAGE), NULL, 0xFFFFFFFF);
+        assert(0 == result);
+        PRINTF("Get Data From Master Side : %d\r\n", msg.DATA);
+        msg.DATA++;
+        result = rpmsg_rtos_send(app_chnl->rp_ept, &msg, sizeof(THE_MESSAGE), app_chnl->dst);
+        assert(0 == result);
     }
+
+    /* If destruction required */
+    /*
+    PRINTF("\r\nMessage pingpong finished\r\n");
+
+    rpmsg_rtos_deinit(rdev);
+    */
 }
 
 int main(void)
@@ -125,34 +127,6 @@ int main(void)
     while (true);
 }
 
-/* rpmsg_rx_callback will call into this for a channel creation event*/
-static void rpmsg_channel_created(struct rpmsg_channel *rp_chnl)
-{
-    /*
-      * we should give the created rp_chnl handler to app layer
-      */
-    app_chnl = rp_chnl;
-
-    /*
-      * sync to application layer
-      */
-    xSemaphoreGiveFromISR(app_sema, NULL);
-}
-
-static void rpmsg_channel_deleted(struct rpmsg_channel *rp_chnl)
-{
-    rpmsg_destroy_ept(rp_chnl->rp_ept);
-}
-
-static void rpmsg_read_cb(struct rpmsg_channel *rp_chnl, void *data, int len,
-                void * priv, unsigned long src)
-{
-    msg_var = *(uint32_t*)data;
-    /*
-    * sync to application layer
-    */
-    xSemaphoreGiveFromISR(app_sema, NULL);
-}
 /*******************************************************************************
  * EOF
  ******************************************************************************/

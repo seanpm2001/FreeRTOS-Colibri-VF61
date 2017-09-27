@@ -41,6 +41,7 @@
 #include <ccm_vf6xx.h>
 #include "debug_console_vf6xx.h"
 #include "pin_mux.h"
+#include "rpmsg/rpmsg_rtos.h"
 
 /*
  * function decalaration for platform provided facility
@@ -48,94 +49,69 @@
 extern void platform_interrupt_enable(void);
 extern void platform_interrupt_disable(void);
 
-#define MAX_STRING_SIZE 496         /* Maximum size to hold the data A7 gives */
-
-/*
- * For the most worst case, master will send 3 consecutive messages which remote
- * do not process.
- * The synchronization between remote and master is that each time endpoint callback
- * is called, the MU Receive interrupt is temperorily disabled. Until the next time
- * remote consumes the message, the interrupt will not be enabled again.
- * When the interrupt is not enabled, Master can not send the notify, it will blocks
- * there and can not send further message.
- * In the worst case, master send the first message, it triggles the ISR in remote
- * side, remote ISR clear the MU status bit so master can send the second message
- * and notify again, master can continue to send the 3rd message but will blocks
- * when trying to notify. Meanwhile, remote side is still in the first ISR which
- * has a loop to receive all the 3 messages.
- * Master is blocked and can not send the 4th message, remote side ISR copies all
- * this 3 message to app buffer and informs the app layer to consume them. After
- * a message is consumed, the ISR is enabled again and the second notify is received.
- * This unblocks the master to complete the 3rd notify and send the next message.
- * The 4th notify will not complete until remote consumes the second message.
- * The situation goes on and we can see application layer need a maximum size 3
- * buffer to hold the unconsumed messages. STRING_BUFFER_CNT is therefore set to 3
- */
-#define STRING_BUFFER_CNT	3
-
 /*
  * APP decided interrupt priority
  */
-#define APP_MSCM_IRQ_PRIORITY	3
-
-/* Internal functions */
-static void rpmsg_channel_created(struct rpmsg_channel *rp_chnl);
-static void rpmsg_channel_deleted(struct rpmsg_channel *rp_chnl);
-static void rpmsg_read_cb(struct rpmsg_channel *, void *, int, void *, unsigned long);
+#define APP_MSCM_IRQ_PRIORITY  3
 
 /* Globals */
-static struct remote_device *rdev;
-static struct rpmsg_channel *app_chnl;
-static char strVar[STRING_BUFFER_CNT][MAX_STRING_SIZE + 1];
-static uint8_t app_idx = 0;
-static uint8_t handler_idx = 0;
-static SemaphoreHandle_t app_sema;
+static char app_buf[512]; /* Each RPMSG buffer can carry less than 512 payload */
 
 /*!
  * @brief A basic RPMSG task
  */
-void StrEchoTask(void *pvParameters)
+static void StrEchoTask(void *pvParameters)
 {
-    printf("RPMSG String Echo Demo...\r\n");
+    int result;
+    struct remote_device *rdev = NULL;
+    struct rpmsg_channel *app_chnl = NULL;
+    void *rx_buf;
+    int len;
+    unsigned long src;
+    void *tx_buf;
+    unsigned long size;
 
-    app_sema = xSemaphoreCreateCounting(STRING_BUFFER_CNT + 1, 0);
+    /* Print the initial banner */
+    PRINTF("\r\nRPMSG String Echo FreeRTOS RTOS API Demo...\r\n");
 
-    printf("RPMSG Init as Remote\r\n");
+    /* RPMSG Init as REMOTE */
+    PRINTF("RPMSG Init as Remote\r\n");
+    result = rpmsg_rtos_init(0 /*REMOTE_CPU_ID*/, &rdev, RPMSG_MASTER, &app_chnl);
+    assert(result == 0);
+
+    PRINTF("Name service handshake is done, M4 has setup a rpmsg channel [%d ---> %d]\r\n", app_chnl->src, app_chnl->dst);
+
     /*
-    * RPMSG Init as REMOTE
-    */
-    rpmsg_init(0, &rdev, rpmsg_channel_created, rpmsg_channel_deleted, rpmsg_read_cb, RPMSG_MASTER);
+     * str_echo demo loop
+     */
+    for (;;)
+    {
+        /* Get RPMsg rx buffer with message */
+        result = rpmsg_rtos_recv_nocopy(app_chnl->rp_ept, &rx_buf, &len, &src, 0xFFFFFFFF);
+        assert(result == 0);
 
-    /*
-    * rpmsg_channel_created will post the first semaphore
-    */
-    xSemaphoreTake(app_sema, portMAX_DELAY);
-    printf("Name service handshake is done, M4 has setup a rpmsg channel [%lu ---> %lu]\r\n", app_chnl->src, app_chnl->dst);
+        /* Copy string from RPMsg rx buffer */
+        assert(len < sizeof(app_buf));
+        memcpy(app_buf, rx_buf, len);
+        app_buf[len] = 0; /* End string by '\0' */
 
+        if ((len == 2) && (app_buf[0] == 0xd) && (app_buf[1] == 0xa))
+            PRINTF("Get New Line From Master Side\r\n");
+        else
+            PRINTF("Get Message From Master Side : \"%s\" [len : %d]\r\n", app_buf, len);
 
-    /*
-    * String Echo demo loop
-    */
-    for (;;) {
-	xSemaphoreTake(app_sema, portMAX_DELAY);
-	/*
-	* Take from next app string buffer
-	*/
-	if ((strlen(strVar[app_idx]) == 2) && (strVar[app_idx][0] == 0xd) && (strVar[app_idx][1] == 0xa))
-	    printf("Get New Line From A5 From Slot %d\r\n", app_idx);
-	else
-	    printf("Get Message From A5 : \"%s\" [len : %d] from slot %d\r\n", strVar[app_idx], strlen(strVar[app_idx]), app_idx);
+        /* Get tx buffer from RPMsg */
+        tx_buf = rpmsg_rtos_alloc_tx_buffer(app_chnl->rp_ept, &size);
+        assert(tx_buf);
+        /* Copy string to RPMsg tx buffer */
+        memcpy(tx_buf, app_buf, len);
+        /* Echo back received message with nocopy send */
+        result = rpmsg_rtos_send_nocopy(app_chnl->rp_ept, tx_buf, len, src);
+        assert(result == 0);
 
-	/*
-	* echo back
-	*/
-	rpmsg_send(app_chnl, (void*)strVar[app_idx], strlen(strVar[app_idx]));
-	app_idx = (app_idx + 1) % STRING_BUFFER_CNT;
-	/*
-	* once a message is consumed, the MSCM receive interrupt can be enabled
-	* again
-	*/
-	platform_interrupt_enable();
+        /* Release held RPMsg rx buffer */
+        result = rpmsg_rtos_recv_nocopy_free(app_chnl->rp_ept, rx_buf);
+        assert(result == 0);
     }
 }
 
@@ -170,46 +146,6 @@ int main(void)
     while (true);
 }
 
-/* rpmsg_rx_callback will call into this for a channel creation event*/
-static void rpmsg_channel_created(struct rpmsg_channel *rp_chnl)
-{
-    /*
-      * we should give the created rp_chnl handler to app layer
-      */
-    app_chnl = rp_chnl;
-
-    /*
-      * sync to application layer
-      */
-    xSemaphoreGiveFromISR(app_sema, NULL);
-}
-
-static void rpmsg_channel_deleted(struct rpmsg_channel *rp_chnl)
-{
-    rpmsg_destroy_ept(rp_chnl->rp_ept);
-}
-
-static void rpmsg_read_cb(struct rpmsg_channel *rp_chnl, void *data, int len,
-                void * priv, unsigned long src)
-{
-    /*
-    * Temperorily Disable MSCM Receive Interrupt to avoid master
-    * sending too many messages and remote will fail to keep pace
-    * to consume
-    */
-    platform_interrupt_disable();
-    /*
-    * Copy to next app string buffer
-    */
-    assert(len <= MAX_STRING_SIZE);
-    memcpy((void*)strVar[handler_idx], data, len);
-    /*
-    * Add trailing '\0'
-    */
-    strVar[handler_idx][len] = 0;
-    handler_idx = (handler_idx + 1) % STRING_BUFFER_CNT;
-    xSemaphoreGiveFromISR(app_sema, NULL);
-}
 /*******************************************************************************
  * EOF
  ******************************************************************************/
